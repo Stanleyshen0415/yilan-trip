@@ -35,7 +35,7 @@
 
   <script type="module">
     import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'
-    import { getDatabase, onValue, ref, runTransaction, set } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js'
+    import { getDatabase, onValue, push, ref, runTransaction, set } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js'
 
     // Firebase web config 為公開設計、安全靠 Realtime Database 規則控管（與 deck themeConfig.firebase 同一組）
     const firebaseConfig = {
@@ -50,6 +50,7 @@
     const mode = params.get('mode') || 'quiz' // quiz | lottery | poll
     const key = params.get('key') || 'brainquiz'
     const pollId = params.get('poll') || 'lunch'
+    const sid = params.get('sid') || 'ideas'
     const app = document.getElementById('app')
 
     let db
@@ -167,12 +168,45 @@
       renderPoll()
     }
 
+    // ---------- 全家許願（建議標籤雲） ----------
+    let lastSuggestQ = '留下你的建議'
+    function runSuggest() {
+      onValue(ref(db, `suggest/${key}/${sid}/state`), (snap) => {
+        const st = snap.val()
+        lastSuggestQ = (st && st.question) || lastSuggestQ
+        if (!document.getElementById('sg'))
+          renderSuggest('')
+        else
+          document.querySelector('#app h1').textContent = lastSuggestQ
+      })
+    }
+
+    function renderSuggest(msg) {
+      app.innerHTML = `<div class="hint"><span class="badge">${esc(myName)}</span></div>
+        <h1>${esc(lastSuggestQ)}</h1>
+        <input id="sg" type="text" placeholder="輸入你的想法…" maxlength="40">
+        <button id="sgsend">送出建議</button>
+        <p class="hint" id="sgmsg" style="text-align:center;margin-top:1rem">${esc(msg)}</p>`
+      const inp = document.getElementById('sg')
+      inp.focus()
+      inp.onkeydown = (e) => { if (e.key === 'Enter') document.getElementById('sgsend').click() }
+      document.getElementById('sgsend').onclick = () => {
+        const v = inp.value.trim()
+        if (!v)
+          return
+        push(ref(db, `suggest/${key}/${sid}/items`), { name: myName, text: v, at: Date.now() })
+        renderSuggest('✅ 已送出！可以再補一則')
+      }
+    }
+
     // ---------- 啟動 ----------
     function start() {
       if (mode === 'lottery')
         runLottery()
       else if (mode === 'poll')
         runPoll()
+      else if (mode === 'suggest')
+        runSuggest()
       else
         runQuiz()
     }
