@@ -1,2 +1,0 @@
-import{B as e,L as t,g as n,p as r,v as i,y as a}from"./modules/shiki-Bcz8T0Ei.js";import{tt as o}from"./index-BVKvv3aG.js";var s={class:`slidev-layout stanley-interactive`},c={__name:`interactive`,setup(c){let{$slidev:l,$nav:u,$clicksContext:d,$clicks:f,$page:p,$renderContext:m,$frontmatter:h}=o();return(o,c)=>(t(),a(r,null,[i(` 互動專用 layout（對應 slidev-fork-spec.md §4.4：單一元件全頁、推薦計算/遊戲/收集型）
-       標題 (h1) 置頂、其後元件區佔滿剩餘空間（見 layout.css .stanley-interactive） `),n(`div`,s,[e(o.$slots,`default`)])],2112))}};export{c as t};
