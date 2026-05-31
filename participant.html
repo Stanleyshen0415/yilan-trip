@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>加入互動 · stanley-brain</title>
+  <style>
+    :root { --pri: #2563eb; --pri2: #0ea5e9; --bg: #f8fafc; --tx: #1e293b; --tx2: #475569; }
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    body { margin: 0; font-family: "Noto Sans TC", system-ui, sans-serif; background: var(--bg); color: var(--tx); min-height: 100vh; }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 1.25rem; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 16px; padding: 1.5rem; box-shadow: 0 2px 12px rgba(0,0,0,.05); }
+    h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+    .hint { color: var(--tx2); font-size: .95rem; }
+    input[type=text] { width: 100%; padding: .8rem 1rem; font-size: 1.1rem; border: 2px solid #cbd5e1; border-radius: 12px; outline: none; }
+    input[type=text]:focus { border-color: var(--pri); }
+    button { width: 100%; padding: .9rem; margin-top: 1rem; font-size: 1.1rem; font-weight: 700; color: #fff; background: var(--pri); border: none; border-radius: 12px; cursor: pointer; }
+    button:disabled { background: #cbd5e1; }
+    .opt { display: block; width: 100%; text-align: left; margin: .5rem 0 0; padding: 1rem; font-size: 1.1rem; font-weight: 600; color: var(--tx); background: #fff; border: 2px solid #e2e8f0; border-radius: 12px; cursor: pointer; }
+    .opt:active { transform: scale(.98); }
+    .opt.picked { border-color: var(--pri); background: #eff6ff; }
+    .opt.correct { border-color: #16a34a; background: #f0fdf4; }
+    .opt.wrong { border-color: #dc2626; background: #fef2f2; }
+    .badge { display: inline-block; padding: .2rem .7rem; border-radius: 999px; background: #eff6ff; color: var(--pri); font-size: .85rem; font-weight: 700; }
+    .big { font-size: 1.5rem; font-weight: 800; text-align: center; padding: 1.5rem 0; }
+    .score { text-align: center; color: var(--pri); font-weight: 800; font-size: 2rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="app">
+      <h1>連線中…</h1>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'
+    import { getDatabase, onValue, ref, runTransaction, set } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-database.js'
+
+    // Firebase web config 為公開設計、安全靠 Realtime Database 規則控管（與 deck themeConfig.firebase 同一組）
+    const firebaseConfig = {
+      apiKey: 'AIzaSyBxLj3q_my1B_Lwb9klanAxo2i7-HvFSro',
+      authDomain: 'stanley-brain.firebaseapp.com',
+      databaseURL: 'https://stanley-brain-default-rtdb.asia-southeast1.firebasedatabase.app',
+      projectId: 'stanley-brain',
+      appId: '1:1080278210812:web:c3b0ab03cc64bf28ec1f79',
+    }
+
+    const params = new URLSearchParams(location.search)
+    const mode = params.get('mode') || 'quiz' // quiz | lottery | poll
+    const key = params.get('key') || 'brainquiz'
+    const pollId = params.get('poll') || 'lunch'
+    const app = document.getElementById('app')
+
+    let db
+    try {
+      db = getDatabase(initializeApp(firebaseConfig))
+    }
+    catch (e) {
+      app.innerHTML = `<h1>⚠️ Firebase 設定錯誤</h1><p class="hint">${e}</p>`
+      throw e
+    }
+
+    const NKEY = `stanley_participant_name_${key}`
+    let myName = localStorage.getItem(NKEY) || ''
+
+    function esc(s) { return String(s).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c])) }
+
+    function askName(next) {
+      app.innerHTML = `<h1>輸入你的名字</h1>
+        <input id="nm" type="text" placeholder="例如：Stanley" maxlength="20" value="${esc(myName)}">
+        <button id="go">加入</button>`
+      const inp = document.getElementById('nm')
+      inp.focus()
+      document.getElementById('go').onclick = () => {
+        const v = inp.value.trim()
+        if (!v)
+          return
+        myName = v
+        localStorage.setItem(NKEY, v)
+        next()
+      }
+    }
+
+    // ---------- 抽籤報名 ----------
+    function runLottery() {
+      set(ref(db, `lottery/${key}/participants/${myName}`), { name: myName, at: Date.now() })
+      app.innerHTML = `<h1>🎉 報名成功</h1>
+        <p class="hint">你（<span class="badge">${esc(myName)}</span>）已加入抽籤名單，等待主持人抽出得獎者。</p>
+        <div class="big">🎁</div>`
+    }
+
+    // ---------- 即時搶答 ----------
+    let answeredQid = null
+    function runQuiz() {
+      onValue(ref(db, `quiz/${key}/state`), (snap) => {
+        const st = snap.val()
+        if (!st || !st.options) {
+          app.innerHTML = `<h1>等待主持人出題…</h1><p class="hint">名字：<span class="badge">${esc(myName)}</span></p>`
+          return
+        }
+        const picked = answeredQid === st.questionId
+        render(st, picked)
+      })
+    }
+
+    function render(st, alreadyAnswered) {
+      const opts = st.options.map((o, i) => {
+        let cls = 'opt'
+        if (st.revealed && i === st.correctAnswerIndex)
+          cls += ' correct'
+        return `<button class="${cls}" data-i="${i}" ${(alreadyAnswered || st.revealed) ? 'disabled' : ''}>${'ABCDE'[i]}. ${esc(o)}</button>`
+      }).join('')
+      app.innerHTML = `<div class="hint">第 ${st.index + 1} 題 · <span class="badge">${esc(myName)}</span></div>
+        <h1>${esc(st.text)}</h1>${opts}
+        ${alreadyAnswered ? '<p class="hint" style="text-align:center;margin-top:1rem">✅ 已作答，等待結果</p>' : ''}`
+      app.querySelectorAll('.opt').forEach((b) => {
+        b.onclick = () => answer(st, Number(b.dataset.i))
+      })
+    }
+
+    function answer(st, i) {
+      answeredQid = st.questionId
+      // 寫下答案
+      set(ref(db, `quiz/${key}/answers/${st.questionId}/${myName}`), i)
+      // 答對 → 加分（demo 版客戶端計分、非防弊）
+      if (i === st.correctAnswerIndex) {
+        runTransaction(ref(db, `quiz/${key}/scores/${myName}`), cur => (cur || 0) + 10)
+      }
+      render(st, true)
+    }
+
+    // ---------- 全家投票 ----------
+    let lastPollState = null
+    let myVote = null
+    function runPoll() {
+      onValue(ref(db, `poll/${key}/${pollId}/state`), (snap) => {
+        const st = snap.val()
+        if (!st || !st.options) {
+          app.innerHTML = `<h1>等待主持人開始投票…</h1><p class="hint">名字：<span class="badge">${esc(myName)}</span></p>`
+          return
+        }
+        lastPollState = st
+        renderPoll()
+      })
+    }
+
+    function renderPoll() {
+      const st = lastPollState
+      if (!st)
+        return
+      const opts = st.options.map((o, i) => {
+        const cls = `opt${myVote === i ? ' picked' : ''}`
+        return `<button class="${cls}" data-i="${i}">${esc(o)}</button>`
+      }).join('')
+      app.innerHTML = `<div class="hint">投票 · <span class="badge">${esc(myName)}</span></div>
+        <h1>${esc(st.question)}</h1>${opts}
+        <p class="hint" style="text-align:center;margin-top:1rem">${myVote === null ? '點選你想要的選項' : '✅ 已投票，可隨時改'}</p>`
+      app.querySelectorAll('.opt').forEach((b) => {
+        b.onclick = () => votePoll(Number(b.dataset.i))
+      })
+    }
+
+    function votePoll(i) {
+      myVote = i
+      set(ref(db, `poll/${key}/${pollId}/votes/${myName}`), i)
+      renderPoll()
+    }
+
+    // ---------- 啟動 ----------
+    function start() {
+      if (mode === 'lottery')
+        runLottery()
+      else if (mode === 'poll')
+        runPoll()
+      else
+        runQuiz()
+    }
+    if (myName)
+      start()
+    else
+      askName(start)
+  </script>
+</body>
+</html>
